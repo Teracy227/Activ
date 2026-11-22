@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMU Activity Monitor</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --text: #1b1f24; --muted: #6b7280; --border: #e5e7eb;
+    --diam: #64748b; --jalan: #16a34a; --lari: #ea580c; --jatuh: #dc2626; --accent: #2563eb;
+    --chart-grid: #e5e7eb; --chart-line: #2563eb; --chart-gyro: #a855f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1115; --card: #181b21; --text: #e6e8eb; --muted: #9aa1ab; --border: #2a2f38;
+      --diam: #94a3b8; --jalan: #22c55e; --lari: #fb923c; --jatuh: #ef4444; --accent: #60a5fa;
+      --chart-grid: #2a2f38; --chart-line: #60a5fa; --chart-gyro: #c084fc;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  header h1 { font-size: 20px; margin: 0; flex: 1; min-width: 180px; }
+  .pill { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+  .pill.on { color: var(--jalan); border-color: var(--jalan); }
+  button { font: inherit; border: 1px solid var(--border); background: var(--card); color: var(--text);
+    padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(12, 1fr); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  .span-12 { grid-column: span 12; } .span-8 { grid-column: span 8; } .span-4 { grid-column: span 4; }
+  .span-6 { grid-column: span 6; }
+  @media (max-width: 760px) { .span-8, .span-4, .span-6 { grid-column: span 12; } }
+
+  .hero { display: flex; align-items: center; gap: 20px; }
+  .hero-icon { width: 88px; height: 88px; border-radius: 20px; display: grid; place-items: center; flex: none;
+    background: color-mix(in srgb, var(--c, var(--diam)) 15%, transparent); color: var(--c, var(--diam)); }
+  .hero-icon svg { width: 52px; height: 52px; }
+  .hero-label { font-size: 42px; font-weight: 700; color: var(--c, var(--diam)); line-height: 1; text-transform: capitalize; }
+  .hero-sub { color: var(--muted); margin-top: 6px; }
+
+  .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .metric .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .metric .k { font-size: 12px; color: var(--muted); }
+
+  canvas { width: 100%; height: 220px; display: block; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 8px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 12px; height: 3px; vertical-align: middle; margin-right: 5px; border-radius: 2px; }
+
+  .timeline { display: flex; height: 26px; border-radius: 6px; overflow: hidden; background: var(--border); }
+  .timeline div { height: 100%; }
+  .tl-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .totals { display: flex; gap: 16px; margin-top: 12px; flex-wrap: wrap; font-size: 14px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+  .log { max-height: 240px; overflow: auto; font-size: 13px; margin: 0; padding: 0; list-style: none; }
+  .log li { padding: 6px 0; border-bottom: 1px solid var(--border); display: flex; gap: 10px; }
+  .log li time { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  .log li.fall { color: var(--jatuh); font-weight: 600; }
+
+  .cfg { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+  .cfg label { font-size: 12px; color: var(--muted); display: block; }
+  .cfg input { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+  select { font: inherit; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); }
+  .muted { color: var(--muted); font-size: 13px; }
+  .warn { background: color-mix(in srgb, var(--lari) 12%, var(--card)); border: 1px solid var(--lari);
+    padding: 10px 14px; border-radius: 10px; margin-bottom: 16px; font-size: 14px; display: none; }
+
+  .alarm { position: fixed; inset: 0; background: color-mix(in srgb, var(--jatuh) 92%, black); color: #fff;
+    display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+    padding: 24px; z-index: 10; animation: flash 1s infinite; }
+  .alarm.show { display: flex; }
+  .alarm h2 { font-size: clamp(32px, 8vw, 64px); margin: 0 0 8px; }
+  .alarm p { font-size: 18px; margin: 4px 0; opacity: .9; }
+  .alarm button { margin-top: 24px; font-size: 18px; padding: 14px 28px; background: #fff; color: var(--jatuh);
+    border: none; font-weight: 700; }
+  @keyframes flash { 50% { background: color-mix(in srgb, var(--jatuh) 75%, black); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>IMU Activity Monitor</h1>
+    <span id="connPill" class="pill">Terputus</span>
+    <button id="btnDemo">Mode demo</button>
+    <button id="btnConnect" class="primary">Hubungkan</button>
+  </header>
+
+  <div id="warnBt" class="warn">
+    Browser ini tidak mendukung Web Bluetooth. Pakai <b>Chrome</b> atau <b>Edge</b> di laptop/Android
+    (di iPhone pakai aplikasi <b>Bluefy</b>). Halaman harus dibuka lewat <code>https://</code> atau <code>localhost</code>.
+  </div>
+
+  <div class="grid">
+    <section class="card span-8">
+      <h2>Aktivitas sekarang</h2>
+      <div class="hero" id="hero">
+        <div class="hero-icon" id="heroIcon"></div>
+        <div>
+          <div class="hero-label" id="heroLabel">—</div>
+          <div class="hero-sub" id="heroSub">Hubungkan perangkat untuk mulai</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card span-4">
+      <h2>Fitur sensor (window 2 s)</h2>
+      <div class="metrics">
+        <div class="metric"><div class="v" id="mSd">—</div><div class="k">Std |a| (g)</div></div>
+        <div class="metric"><div class="v" id="mPk">—</div><div class="k">Puncak |a| (g)</div></div>
+        <div class="metric"><div class="v" id="mG">—</div><div class="k">Rata-rata gyro (°/s)</div></div>
+        <div class="metric"><div class="v" id="mFc">0</div><div class="k">Jumlah jatuh</div></div>
+      </div>
+    </section>
+
+    <section class="card span-12">
+      <h2>Sinyal langsung (10 detik terakhir)</h2>
+      <canvas id="chart"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--chart-line)"></i>|a| (g)</span>
+        <span><i style="background:var(--chart-gyro)"></i>|gyro| ÷ 100 (°/s)</span>
+        <span><i style="background:var(--jatuh)"></i>Ambang impact</span>
+        <span><i style="background:var(--lari)"></i>Ambang free-fall</span>
+      </div>
+    </section>
+
+    <section class="card span-8">
+      <h2>Linimasa (10 menit terakhir)</h2>
+      <div class="timeline" id="timeline"></div>
+      <div class="tl-axis"><span>−10 mnt</span><span>−5 mnt</span><span>sekarang</span></div>
+      <div class="totals" id="totals"></div>
+    </section>
+
+    <section class="card span-4">
+      <h2>Log kejadian</h2>
+      <ul class="log" id="log"></ul>
+    </section>
+
+    <section class="card span-6">
+      <h2>Rekam data (untuk dataset)</h2>
+      <p class="muted">Rekam data mentah 50 Hz (akselerometer dalam g, gyro dalam °/s) dengan label, lalu unduh sebagai CSV.</p>
+      <div class="row">
+        <select id="recLabel">
+          <option>diam</option><option>jalan</option><option>lari</option><option>jatuh</option><option>lainnya</option>
+        </select>
+        <button id="btnRec">Mulai rekam</button>
+        <button id="btnCsv" disabled>Unduh CSV</button>
+        <button id="btnClear" disabled>Hapus</button>
+      </div>
+      <p class="muted" id="recInfo">0 sampel</p>
+    </section>
+
+    <section class="card span-6">
+      <h2>Pengaturan ambang</h2>
+      <div class="cfg" id="cfg"></div>
+      <div class="row">
+        <button id="btnSave" disabled>Simpan ke alat</button>
+        <button id="btnCal" disabled>Kalibrasi gyro</button>
+        <button id="btnRst" disabled>Reset default</button>
+        <button id="btnTest" disabled>Tes alarm</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="alarm" id="alarm">
+  <h2>JATUH TERDETEKSI</h2>
+  <p id="alarmTime"></p>
+  <p id="alarmInfo"></p>
+  <button id="btnAck">Tandai aman</button>
+</div>
+
+<script>
+const SVC = '6e7a0001-3c1b-4d2a-9f10-5a7e1c0d2b01';
+const STATUS = '6e7a0002-3c1b-4d2a-9f10-5a7e1c0d2b01';
+const RAW = '6e7a0003-3c1b-4d2a-9f10-5a7e1c0d2b01';
+const CMD = '6e7a0004-3c1b-4d2a-9f10-5a7e1c0d2b01';
+
+const CFG_META = {
+  walkSd:    ['Std min. jalan (g)', 0.01],
+  runSd:     ['Std min. lari (g)', 0.01],
+  stillGyro: ['Gyro maks. diam (°/s)', 1],
+  ffTh:      ['Ambang free-fall (g)', 0.05],
+  impTh:     ['Ambang impact (g)', 0.1],
+  impHardTh: ['Impact keras (g)', 0.1],
+  postSd:    ['Std maks. pasca jatuh (g)', 0.01],
+  angleTh:   ['Perubahan orientasi (°)', 1],
+};
+
+const ICONS = {
+  diam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="4.5" r="2"/><path d="M12 7.5v7M12 14.5l-2.5 7M12 14.5l2.5 7M8 10.5h8"/></svg>',
+  jalan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="4" r="2"/><path d="M11 21l2-6-3-3 1-5 3 3h3M10 12l-3 2M13 15l2 6"/></svg>',
+  lari: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="15" cy="4" r="2"/><path d="M4 18l4-1 2-4M14 21l-1-5-3-3 3-5 3 3h4M13 8L9 8l-3 3"/></svg>',
+  jatuh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="19" cy="13" r="2"/><path d="M3 20h18M16 14l-5 1-4 3M11 15l-3-5 4-3"/></svg>',
+};
+const COLOR = { diam: 'var(--diam)', jalan: 'var(--jalan)', lari: 'var(--lari)', jatuh: 'var(--jatuh)' };
+
+const $ = id => document.getElementById(id);
+let device = null, chCmd = null, demoTimer = null;
+let cfg = {};
+let current = null, currentSince = Date.now();
+const segments = [];        // {act, start, end}
+const samples = [];         // ring buffer for chart: {t, a, g}
+let recording = false; const rec = [];
+let fallActive = false, lastFc = null;
+
+// ---------------- Koneksi BLE ----------------
+if (!navigator.bluetooth) $('warnBt').style.display = 'block';
+
+$('btnConnect').onclick = async () => {
+  if (device?.gatt?.connected) { device.gatt.disconnect(); return; }
+  if (!navigator.bluetooth) { $('warnBt').style.display = 'block'; return; }
+  try {
+    stopDemo();
+    setConn('Mencari…');
+    device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
+    device.addEventListener('gattserverdisconnected', onDisconnected);
+    await connectGatt();
+  } catch (e) {
+    console.error(e);
+    setConn(e.name === 'NotFoundError' ? 'Terputus' : 'Gagal: ' + e.message);
+  }
+};
+
+async function connectGatt() {
+  setConn('Menghubungkan…');
+  const server = await device.gatt.connect();
+  const svc = await server.getPrimaryService(SVC);
+  const chStatus = await svc.getCharacteristic(STATUS);
+  const chRaw = await svc.getCharacteristic(RAW);
+  chCmd = await svc.getCharacteristic(CMD);
+  chStatus.addEventListener('characteristicvaluechanged', e => onStatus(new TextDecoder().decode(e.target.value)));
+  chRaw.addEventListener('characteristicvaluechanged', e => onRaw(e.target.value));
+  await chStatus.startNotifications();
+  await chRaw.startNotifications();
+  setConn('Terhubung: ' + (device.name || 'IMU'), true);
+  setControls(true);
+  addLog('Terhubung ke ' + (device.name || 'perangkat'));
+  await sendCmd('GET');
+}
+
+async function onDisconnected() {
+  setConn('Terputus — menyambung ulang…');
+  setControls(false);
+  addLog('Koneksi terputus');
+  for (let i = 0; i < 5; i++) {
+    try { await new Promise(r => setTimeout(r, 1000 * (i + 1))); await connectGatt(); return; }
+    catch (e) { console.warn('reconnect gagal', e); }
+  }
+  setConn('Terputus');
+}
+
+async function sendCmd(s) {
+  if (demoTimer) return demoCmd(s);
+  if (!chCmd) return;
+  try { await chCmd.writeValueWithResponse(new TextEncoder().encode(s)); }
+  catch (e) { console.warn('kirim perintah gagal', e); }
+}
+
+function setConn(text, on = false) {
+  $('connPill').textContent = text;
+  $('connPill').classList.toggle('on', on);
+  $('btnConnect').textContent = on ? 'Putuskan' : 'Hubungkan';
+}
+function setControls(on) {
+  ['btnSave', 'btnCal', 'btnRst', 'btnTest'].forEach(id => $(id).disabled = !on);
+}
+
+// ---------------- Data masuk ----------------
+function onStatus(text) {
+  let d; try { d = JSON.parse(text); } catch { return; }
+  if (d.cfg) { cfg = d.cfg; renderCfg(); return; }
+  if (d.msg) { addLog(d.msg); return; }
+
+  $('mSd').textContent = d.sd.toFixed(3);
+  $('mPk').textContent = d.pk.toFixed(2);
+  $('mG').textContent = d.g.toFixed(1);
+  $('mFc').textContent = d.fc;
+
+  setActivity(d.a);
+
+  if (d.f && !fallActive) startAlarm(d);
+  if (!d.f && fallActive) stopAlarm(false);
+  if (lastFc !== null && d.fc > lastFc && d.f) addLog(`JATUH (impact ${d.imp.toFixed(2)} g, orientasi ${d.ang}°)`, true);
+  lastFc = d.fc;
+}
+
+function onRaw(dv) {
+  const n = dv.getUint8(1);
+  const now = performance.now();
+  for (let i = 0; i < n; i++) {
+    const o = 2 + i * 12;
+    const ax = dv.getInt16(o, true) / 1000, ay = dv.getInt16(o + 2, true) / 1000, az = dv.getInt16(o + 4, true) / 1000;
+    const gx = dv.getInt16(o + 6, true) / 10, gy = dv.getInt16(o + 8, true) / 10, gz = dv.getInt16(o + 10, true) / 10;
+    pushSample(now - (n - 1 - i) * 20, ax, ay, az, gx, gy, gz);
+  }
+}
+
+function pushSample(t, ax, ay, az, gx, gy, gz) {
+  const a = Math.hypot(ax, ay, az), g = Math.hypot(gx, gy, gz);
+  samples.push({ t, a, g });
+  while (samples.length && samples[0].t < t - 10000) samples.shift();
+  if (recording) {
+    rec.push([Date.now(), $('recLabel').value, ax, ay, az, gx, gy, gz]);
+    if (rec.length % 25 === 0) updateRecInfo();
+  }
+}
+
+// ---------------- Aktivitas & linimasa ----------------
+function setActivity(act) {
+  const now = Date.now();
+  if (act !== current) {
+    if (segments.length) segments[segments.length - 1].end = now;
+    segments.push({ act, start: now, end: now });
+    if (current !== null) addLog(`${cap(current)} → ${cap(act)}`);
+    current = act; currentSince = now;
+  } else {
+    segments[segments.length - 1].end = now;
+  }
+  const shown = fallActive ? 'jatuh' : act;
+  $('hero').style.setProperty('--c', COLOR[shown]);
+  $('heroIcon').style.setProperty('--c', COLOR[shown]);
+  $('heroIcon').innerHTML = ICONS[shown];
+  $('heroLabel').textContent = shown;
+}
+
+function renderTimeline() {
+  const now = Date.now(), span = 10 * 60 * 1000, from = now - span;
+  const el = $('timeline');
+  el.innerHTML = '';
+  let cursor = from;
+  for (const s of segments) {
+    const st = Math.max(s.start, from), en = Math.min(s.end, now);
+    if (en <= from) continue;
+    if (st > cursor) { const gap = document.createElement('div'); gap.style.width = ((st - cursor) / span * 100) + '%'; el.appendChild(gap); }
+    const d = document.createElement('div');
+    d.style.width = ((en - st) / span * 100) + '%';
+    d.style.background = COLOR[s.act];
+    d.title = `${cap(s.act)} ${fmtDur(s.end - s.start)}`;
+    el.appendChild(d);
+    cursor = en;
+  }
+  const tot = { diam: 0, jalan: 0, lari: 0 };
+  for (const s of segments) tot[s.act] = (tot[s.act] || 0) + (s.end - s.start);
+  $('totals').innerHTML = Object.entries(tot).map(([k, v]) =>
+    `<span><span class="dot" style="background:${COLOR[k]}"></span>${cap(k)} <b>${fmtDur(v)}</b></span>`).join('');
+  if (current) $('heroSub').textContent = `Selama ${fmtDur(now - currentSince)}`;
+}
+setInterval(renderTimeline, 1000);
+
+// ---------------- Alarm jatuh ----------------
+let audioCtx = null, beepTimer = null;
+function startAlarm(d) {
+  fallActive = true;
+  $('alarm').classList.add('show');
+  $('alarmTime').textContent = 'Pukul ' + new Date().toLocaleTimeString('id-ID');
+  $('alarmInfo').textContent = d.imp > 0 ? `Impact ${d.imp.toFixed(2)} g · orientasi berubah ${d.ang}°` : 'Tes alarm';
+  setActivity(current || 'diam');
+  try {
+    audioCtx = audioCtx || new AudioContext();
+    const beep = () => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.frequency.value = 880; o.connect(g); g.connect(audioCtx.destination);
+      g.gain.setValueAtTime(0.25, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+      o.start(); o.stop(audioCtx.currentTime + 0.4);
+    };
+    beep(); beepTimer = setInterval(beep, 700);
+  } catch {}
+  navigator.vibrate?.([500, 200, 500, 200, 500]);
+  if ('Notification' in window && Notification.permission === 'granted')
+    new Notification('Jatuh terdeteksi!', { body: $('alarmInfo').textContent, requireInteraction: true });
+}
+function stopAlarm(sendAck = true) {
+  fallActive = false;
+  $('alarm').classList.remove('show');
+  clearInterval(beepTimer);
+  if (sendAck) { sendCmd('ACK'); addLog('Ditandai aman'); }
+  if (current) setActivity(current);
+}
+$('btnAck').onclick = () => stopAlarm(true);
+
+// ---------------- Grafik ----------------
+const cv = $('chart'), ctx = cv.getContext('2d');
+function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+function draw() {
+  const dpr = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== w * dpr || cv.height !== h * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const pad = { l: 34, r: 8, t: 8, b: 18 };
+  const maxA = Math.max(4, ...samples.map(s => s.a), (cfg.impHardTh || 3.5) + 0.5);
+  const now = performance.now();
+  const X = t => pad.l + (1 - (now - t) / 10000) * (w - pad.l - pad.r);
+  const Y = v => h - pad.b - (v / maxA) * (h - pad.t - pad.b);
+
+  ctx.font = '11px system-ui'; ctx.fillStyle = css('--muted'); ctx.strokeStyle = css('--chart-grid'); ctx.lineWidth = 1;
+  for (let v = 0; v <= maxA; v += 1) {
+    ctx.beginPath(); ctx.moveTo(pad.l, Y(v)); ctx.lineTo(w - pad.r, Y(v)); ctx.stroke();
+    ctx.fillText(v + 'g', 4, Y(v) + 4);
+  }
+  for (let s = 0; s <= 10; s += 2) ctx.fillText(`-${10 - s}s`, X(now - (10 - s) * 1000) - 10, h - 4);
+
+  const hline = (v, c) => { if (!v) return; ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = c;
+    ctx.beginPath(); ctx.moveTo(pad.l, Y(v)); ctx.lineTo(w - pad.r, Y(v)); ctx.stroke(); ctx.restore(); };
+  hline(cfg.impTh, css('--jatuh')); hline(cfg.ffTh, css('--lari'));
+
+  const line = (key, scale, color, width) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
+    samples.forEach((s, i) => { const x = X(s.t), y = Y(s[key] * scale); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+  };
+  line('g', 0.01, css('--chart-gyro'), 1);
+  line('a', 1, css('--chart-line'), 1.8);
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+// ---------------- Konfigurasi ----------------
+function renderCfg() {
+  $('cfg').innerHTML = Object.entries(CFG_META).map(([k, [label, step]]) =>
+    `<div><label for="cfg_${k}">${label}</label><input id="cfg_${k}" type="number" step="${step}" value="${cfg[k] ?? ''}"></div>`).join('');
+}
+renderCfg();
+$('btnSave').onclick = async () => {
+  for (const k of Object.keys(CFG_META)) {
+    const v = parseFloat($('cfg_' + k).value);
+    if (!isNaN(v) && v !== cfg[k]) await sendCmd(`SET ${k} ${v}`);
+  }
+  addLog('Pengaturan disimpan ke alat');
+};
+$('btnCal').onclick = () => sendCmd('CAL');
+$('btnRst').onclick = () => sendCmd('RST');
+$('btnTest').onclick = () => {
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  sendCmd('TEST');
+};
+
+// ---------------- Perekaman ----------------
+$('btnRec').onclick = () => {
+  recording = !recording;
+  $('btnRec').textContent = recording ? 'Stop rekam' : 'Mulai rekam';
+  $('btnRec').classList.toggle('primary', recording);
+  if (recording) addLog(`Mulai rekam label "${$('recLabel').value}"`);
+  updateRecInfo();
+};
+function updateRecInfo() {
+  const counts = {};
+  rec.forEach(r => counts[r[1]] = (counts[r[1]] || 0) + 1);
+  $('recInfo').textContent = `${rec.length} sampel` + (rec.length ? ' · ' + Object.entries(counts).map(([k, v]) => `${k}: ${(v / 50).toFixed(0)} s`).join(', ') : '');
+  $('btnCsv').disabled = $('btnClear').disabled = !rec.length;
+}
+$('btnCsv').onclick = () => {
+  const csv = 'timestamp_ms,label,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps\n' + rec.map(r => r.join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = `imu_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+  a.click();
+};
+$('btnClear').onclick = () => { rec.length = 0; updateRecInfo(); };
+
+// ---------------- Log ----------------
+function addLog(text, fall = false) {
+  const li = document.createElement('li');
+  if (fall) li.className = 'fall';
+  li.innerHTML = `<time>${new Date().toLocaleTimeString('id-ID')}</time><span></span>`;
+  li.lastChild.textContent = text;
+  $('log').prepend(li);
+  while ($('log').children.length > 200) $('log').lastChild.remove();
+}
+
+// ---------------- Mode demo (tanpa alat) ----------------
+let demo = null;
+$('btnDemo').onclick = () => demoTimer ? stopDemo() : startDemo();
+function startDemo() {
+  if (device?.gatt?.connected) device.gatt.disconnect();
+  demo = { t: 0, phase: 'diam', fc: 0, fall: false, n: 0 };
+  cfg = { walkSd: 0.06, runSd: 0.5, stillGyro: 25, ffTh: 0.45, impTh: 2.5, impHardTh: 3.5, postSd: 0.12, angleTh: 45 };
+  renderCfg();
+  setConn('Mode demo', true); setControls(true);
+  $('btnDemo').textContent = 'Stop demo';
+  addLog('Mode demo aktif (data simulasi)');
+  const plan = ['diam', 'jalan', 'lari', 'jalan', 'diam'];
+  demoTimer = setInterval(() => {
+    demo.t += 20; demo.n++;
+    const sec = demo.t / 1000;
+    demo.phase = plan[Math.floor(sec / 8) % plan.length];
+    const f = demo.phase === 'lari' ? 2.8 : 1.8;
+    const amp = { diam: 0.01, jalan: 0.25, lari: 0.9 }[demo.phase];
+    const az = 1 + amp * Math.sin(2 * Math.PI * f * sec) + (Math.random() - .5) * amp * .5;
+    const gyr = { diam: 1, jalan: 60, lari: 180 }[demo.phase];
+    pushSample(performance.now(), (Math.random() - .5) * amp, (Math.random() - .5) * amp, az,
+      gyr * Math.sin(sec * 3), gyr * Math.cos(sec * 2), 0);
+    if (demo.n % 25 === 0) {
+      const recent = samples.slice(-100).map(s => s.a);
+      const m = recent.reduce((a, b) => a + b, 0) / recent.length;
+      const sd = Math.sqrt(recent.reduce((a, b) => a + (b - m) ** 2, 0) / recent.length);
+      onStatus(JSON.stringify({ a: demo.phase, f: demo.fall ? 1 : 0, sd, pk: Math.max(...recent), g: gyr * 0.7,
+        ang: demo.fall ? 90 : 0, imp: demo.fall ? 3.1 : 0, fc: demo.fc, n: demo.n }));
+    }
+  }, 20);
+}
+function stopDemo() {
+  if (!demoTimer) return;
+  clearInterval(demoTimer); demoTimer = null;
+  $('btnDemo').textContent = 'Mode demo';
+  setConn('Terputus'); setControls(false);
+  if (fallActive) stopAlarm(false);
+}
+function demoCmd(s) {
+  if (s === 'TEST') { demo.fall = true; demo.fc++; }
+  if (s === 'ACK') demo.fall = false;
+  if (s === 'RST' || s === 'GET') onStatus(JSON.stringify({ cfg }));
+  if (s.startsWith('SET ')) { const [, k, v] = s.split(' '); cfg[k] = parseFloat(v); }
+  if (s === 'CAL') addLog('gyro dikalibrasi (demo)');
+}
+
+// ---------------- Util ----------------
+function cap(s) { return s ? s[0].toUpperCase() + s.slice(1) : s; }
+function fmtDur(ms) {
+  const s = Math.floor(ms / 1000), m = Math.floor(s / 60), h = Math.floor(m / 60);
+  return h ? `${h}j ${m % 60}m` : m ? `${m}m ${s % 60}d` : `${s}d`;
+}
+</script>
+</body>
+</html>
