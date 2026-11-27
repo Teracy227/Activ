@@ -43,6 +43,23 @@
   .hero-icon svg { width: 52px; height: 52px; }
   .hero-label { font-size: 42px; font-weight: 700; color: var(--c, var(--diam)); line-height: 1; text-transform: capitalize; }
   .hero-sub { color: var(--muted); margin-top: 6px; }
+  .probs { display: grid; gap: 6px; margin-top: 16px; }
+  .prob { display: grid; grid-template-columns: 3.5em minmax(0, 1fr) 3em; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); }
+  .prob b { text-align: right; font-variant-numeric: tabular-nums; color: var(--text); font-weight: 600; }
+  .ptrack { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  .pfill { height: 100%; width: 0; border-radius: 4px; transition: width .3s; }
+  .recform { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .recform label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  .recform input, .recform select { font: inherit; font-size: 15px; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); width: 100%; }
+  .tip { font-size: 13px; margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .tip:empty { display: none; }
+  .progress { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 12px; }
+  .progress div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .progress.rec div { background: var(--jatuh); }
+  .clips { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+  .clips li { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; }
+  .clips li span { min-width: 0; overflow-wrap: anywhere; }
+  .clips li button { padding: 5px 10px; font-size: 13px; flex: none; }
 
   .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
   .metric .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -108,6 +125,11 @@
           <div class="hero-sub" id="heroSub">Hubungkan perangkat untuk mulai</div>
         </div>
       </div>
+      <div class="probs" id="probs" aria-label="Probabilitas Random Forest per kelas">
+        <div class="prob"><span>Diam</span><div class="ptrack"><div class="pfill" id="pDiam" style="background:var(--diam)"></div></div><b id="vDiam">—</b></div>
+        <div class="prob"><span>Jalan</span><div class="ptrack"><div class="pfill" id="pJalan" style="background:var(--jalan)"></div></div><b id="vJalan">—</b></div>
+        <div class="prob"><span>Lari</span><div class="ptrack"><div class="pfill" id="pLari" style="background:var(--lari)"></div></div><b id="vLari">—</b></div>
+      </div>
     </section>
 
     <section class="card span-4">
@@ -146,17 +168,30 @@
     </section>
 
     <section class="card span-6">
-      <h2>Rekam data (untuk dataset)</h2>
-      <p class="muted">Rekam data mentah 50 Hz (akselerometer dalam g, gyro dalam °/s) dengan label, lalu unduh sebagai CSV.</p>
-      <div class="row">
-        <select id="recLabel">
-          <option>diam</option><option>jalan</option><option>lari</option><option>jatuh</option><option>lainnya</option>
-        </select>
-        <button id="btnRec">Mulai rekam</button>
-        <button id="btnCsv" disabled>Unduh CSV</button>
-        <button id="btnClear" disabled>Hapus</button>
+      <h2>Rekam dataset (50 Hz, disimpan di alat)</h2>
+      <p class="muted">Data direkam penuh di memori ESP32, lalu dikirim ke HP setelah selesai, jadi tidak ada sampel yang hilang. Satu klip menjadi satu file CSV.</p>
+      <div class="recform">
+        <label for="recSubject">Nama subjek<input id="recSubject" maxlength="20" placeholder="mis. Budi" autocomplete="off"></label>
+        <label for="recLabel">Aktivitas
+          <select id="recLabel">
+            <option>diam</option><option>jalan</option><option>lari</option><option>jatuh</option><option>lainnya</option>
+          </select>
+        </label>
+        <label for="recDur">Durasi
+          <select id="recDur">
+            <option value="30">30 detik</option><option value="60" selected>60 detik</option><option value="120">120 detik</option>
+          </select>
+        </label>
       </div>
-      <p class="muted" id="recInfo">0 sampel</p>
+      <p class="tip" id="recTip"></p>
+      <div class="row">
+        <button id="btnRec" class="primary" disabled>Mulai rekam</button>
+        <button id="btnRecStop" disabled>Stop</button>
+        <button id="btnFetch" hidden>Ambil rekaman di alat</button>
+      </div>
+      <div class="progress" id="recProg" hidden><div id="recBar"></div></div>
+      <p class="muted" id="recInfo">Hubungkan alat untuk mulai merekam.</p>
+      <ul class="clips" id="clips"></ul>
     </section>
 
     <section class="card span-6">
@@ -184,6 +219,7 @@ const SVC = '6e7a0001-3c1b-4d2a-9f10-5a7e1c0d2b01';
 const STATUS = '6e7a0002-3c1b-4d2a-9f10-5a7e1c0d2b01';
 const RAW = '6e7a0003-3c1b-4d2a-9f10-5a7e1c0d2b01';
 const CMD = '6e7a0004-3c1b-4d2a-9f10-5a7e1c0d2b01';
+const DATA = '6e7a0005-3c1b-4d2a-9f10-5a7e1c0d2b01';
 
 const CFG_META = {
   ffTh:     ['Ambang free-fall (g)', 0.05],
@@ -207,7 +243,7 @@ let cfg = {};
 let current = null, currentSince = Date.now();
 const segments = [];        // {act, start, end}
 const samples = [];         // ring buffer for chart: {t, a, g}
-let recording = false; const rec = [];
+let hasRecorder = false;   // firmware punya characteristic DATA
 let fallActive = false, lastFc = null, lastConf = null;
 
 // ---------------- Koneksi BLE ----------------
@@ -239,6 +275,15 @@ async function connectGatt() {
   chRaw.addEventListener('characteristicvaluechanged', e => onRaw(e.target.value));
   await chStatus.startNotifications();
   await chRaw.startNotifications();
+  try {
+    const chData = await svc.getCharacteristic(DATA);
+    chData.addEventListener('characteristicvaluechanged', e => onData(e.target.value));
+    await chData.startNotifications();
+    hasRecorder = true;
+  } catch (e) {
+    hasRecorder = false;
+    addLog('Firmware lama: perekam 50 Hz belum tersedia, upload firmware terbaru');
+  }
   setConn('Terhubung: ' + (device.name || 'IMU'), true);
   setControls(true);
   addLog('Terhubung ke ' + (device.name || 'perangkat'));
@@ -270,6 +315,7 @@ function setConn(text, on = false) {
 }
 function setControls(on) {
   ['btnSave', 'btnCal', 'btnRst', 'btnTest'].forEach(id => $(id).disabled = !on);
+  updateRecUi();
 }
 
 // ---------------- Data masuk ----------------
@@ -287,6 +333,13 @@ function onStatus(text) {
   $('mUs').textContent = typeof d.us === 'number' ? (d.us / 1000).toFixed(1) : '—';
 
   setActivity(d.a);
+  if (Array.isArray(d.p)) {
+    ['Diam', 'Jalan', 'Lari'].forEach((k, i) => {
+      $('p' + k).style.width = Math.round(d.p[i] * 100) + '%';
+      $('v' + k).textContent = Math.round(d.p[i] * 100) + '%';
+    });
+  }
+  if ('rs' in d) onRecStatus(d);
 
   if (d.f && !fallActive) startAlarm(d);
   if (!d.f && fallActive) stopAlarm(false);
@@ -309,10 +362,6 @@ function pushSample(t, ax, ay, az, gx, gy, gz) {
   const a = Math.hypot(ax, ay, az), g = Math.hypot(gx, gy, gz);
   samples.push({ t, a, g });
   while (samples.length && samples[0].t < t - 10000) samples.shift();
-  if (recording) {
-    rec.push([Date.now(), $('recLabel').value, ax, ay, az, gx, gy, gz]);
-    if (rec.length % 25 === 0) updateRecInfo();
-  }
 }
 
 // ---------------- Aktivitas & linimasa ----------------
@@ -446,28 +495,193 @@ $('btnTest').onclick = () => {
   sendCmd('TEST');
 };
 
-// ---------------- Perekaman ----------------
-$('btnRec').onclick = () => {
-  recording = !recording;
-  $('btnRec').textContent = recording ? 'Stop rekam' : 'Mulai rekam';
-  $('btnRec').classList.toggle('primary', recording);
-  if (recording) addLog(`Mulai rekam label "${$('recLabel').value}"`);
-  updateRecInfo();
+// ---------------- Perekaman 50 Hz (disimpan di ESP32, lalu diambil) ----------------
+const FS = 50;
+const TIPS = {
+  diam: 'Variasikan: berdiri, duduk, berbaring, diam sambil main HP. Posisi alat sama seperti saat dipakai.',
+  jalan: 'Mulai jalan dulu, baru tekan Mulai. Variasikan kecepatan: pelan, normal, cepat.',
+  lari: 'Mulai lari dulu, baru tekan Mulai. Rekam terpisah untuk jogging pelan, sedang, dan cepat.',
+  jatuh: 'Wajib di kasur/matras. Pilih 120 detik: jatuh → diam ±3 detik → bangun pelan → ulangi ±6–8 kali dari arah berbeda (depan, belakang, kiri, kanan).',
+  lainnya: 'Gerakan mirip jatuh tapi bukan jatuh: duduk keras di kursi, rebahan ke kasur, melompat, jongkok cepat.',
 };
-function updateRecInfo() {
-  const counts = {};
-  rec.forEach(r => counts[r[1]] = (counts[r[1]] || 0) + 1);
-  $('recInfo').textContent = `${rec.length} sampel` + (rec.length ? ' · ' + Object.entries(counts).map(([k, v]) => `${k}: ${(v / 50).toFixed(0)} s`).join(', ') : '');
-  $('btnCsv').disabled = $('btnClear').disabled = !rec.length;
+const recUi = { phase: 'idle', label: '', subject: '', startMs: 0, fetchedForThis: false };
+const clips = [];
+let dataHandler = null;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function isConnected() { return !!demoTimer || !!device?.gatt?.connected; }
+
+function updateRecUi() {
+  const conn = isConnected() && (hasRecorder || !!demoTimer);
+  const busy = recUi.phase !== 'idle';
+  $('btnRec').disabled = !conn || busy;
+  $('btnRecStop').disabled = recUi.phase !== 'recording';
+  ['recSubject', 'recLabel', 'recDur'].forEach(id => $(id).disabled = busy);
+  $('recTip').textContent = TIPS[$('recLabel').value] || '';
+  if (!conn && !busy) $('recInfo').textContent = isConnected() ? 'Firmware alat belum mendukung perekam 50 Hz.' : 'Hubungkan alat untuk mulai merekam.';
+  else if (conn && !busy && !clips.length && !$('recInfo').dataset.msg) $('recInfo').textContent = 'Isi nama subjek, pilih aktivitas dan durasi, lalu tekan Mulai rekam.';
 }
-$('btnCsv').onclick = () => {
-  const csv = 'timestamp_ms,label,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps\n' + rec.map(r => r.join(',')).join('\n');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  a.download = `imu_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
-  a.click();
+$('recLabel').onchange = () => {
+  if ($('recLabel').value === 'jatuh') $('recDur').value = '120';
+  updateRecUi();
 };
-$('btnClear').onclick = () => { rec.length = 0; updateRecInfo(); };
+updateRecUi();
+
+function setProgress(frac, cls) {
+  $('recProg').hidden = frac === null;
+  $('recProg').className = 'progress' + (cls ? ' ' + cls : '');
+  if (frac !== null) $('recBar').style.width = Math.round(frac * 100) + '%';
+}
+function recMsg(text) { $('recInfo').textContent = text; $('recInfo').dataset.msg = '1'; }
+
+function beep(freq = 880, dur = 0.12) {
+  try {
+    audioCtx = audioCtx || new AudioContext();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.frequency.value = freq; o.connect(g); g.connect(audioCtx.destination);
+    g.gain.setValueAtTime(0.2, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+  } catch {}
+}
+
+$('btnRec').onclick = async () => {
+  const subject = $('recSubject').value.trim();
+  if (!subject) { recMsg('Isi nama subjek dulu (supaya data bisa dipisah per orang saat evaluasi).'); $('recSubject').focus(); return; }
+  recUi.phase = 'countdown'; recUi.label = $('recLabel').value; recUi.subject = subject; recUi.fetchedForThis = false;
+  updateRecUi();
+  for (let i = 3; i > 0; i--) { recMsg(`Bersiap… ${i}`); beep(660); await sleep(1000); }
+  if (!isConnected()) { recUi.phase = 'idle'; updateRecUi(); return; }
+  const n = parseInt($('recDur').value) * FS;
+  recUi.phase = 'recording'; recUi.startMs = Date.now();
+  beep(1200, 0.3);
+  await sendCmd(`REC ${n}`);
+  addLog(`Mulai rekam: ${recUi.subject} · ${recUi.label} · ${n / FS} detik`);
+  recMsg(`Merekam ${recUi.label}… 0/${n / FS} detik`);
+  setProgress(0, 'rec');
+  updateRecUi();
+};
+$('btnRecStop').onclick = () => sendCmd('RECSTOP');
+$('btnFetch').onclick = () => {
+  recUi.label = $('recLabel').value; recUi.subject = $('recSubject').value.trim() || 'tanpa-nama';
+  recUi.startMs = Date.now(); fetchClip(lastRec.rn);
+};
+
+let lastRec = { rs: 0, rn: 0, rm: 0 };
+function onRecStatus(d) {
+  lastRec = d;
+  if (recUi.phase === 'recording') {
+    if (d.rs === 1) {
+      setProgress(d.rn / d.rm, 'rec');
+      recMsg(`Merekam ${recUi.label}… ${Math.floor(d.rn / FS)}/${Math.round(d.rm / FS)} detik`);
+    } else if (d.rs === 2) {
+      beep(1200, 0.3);
+      fetchClip(d.rn);
+    } else if (d.rs === 0) {
+      recUi.phase = 'idle'; setProgress(null); recMsg('Rekaman dibatalkan (tidak ada data).'); updateRecUi();
+    }
+  }
+  // ada rekaman di alat yang belum diambil (mis. setelah koneksi putus / halaman dimuat ulang)
+  $('btnFetch').hidden = !(recUi.phase === 'idle' && d.rs === 2 && !recUi.fetchedForThis);
+}
+
+function onData(dv) { if (dataHandler) dataHandler(dv); }
+
+async function fetchClip(total) {
+  recUi.phase = 'fetching'; updateRecUi(); $('btnFetch').hidden = true;
+  const vals = new Int16Array(total * 6), have = new Uint8Array(total);
+  let count = 0;
+  dataHandler = dv => {
+    if (dv.byteLength < 6 || dv.getUint8(0) !== 0xD1) return;
+    const s = dv.getUint32(1, true), n = dv.getUint8(5);
+    for (let i = 0; i < n; i++) {
+      const k = s + i;
+      if (k >= total || have[k] || 6 + (i + 1) * 12 > dv.byteLength) continue;
+      for (let j = 0; j < 6; j++) vals[k * 6 + j] = dv.getInt16(6 + i * 12 + j * 2, true);
+      have[k] = 1; count++;
+    }
+  };
+  const done = (a, b) => { for (let i = a; i < b; i++) if (!have[i]) return false; return true; };
+  const CH = 200;
+  let requests = 0;
+  try {
+    for (let pass = 0; pass < 8 && count < total; pass++) {
+      for (let s = 0; s < total; s += CH) {
+        const e = Math.min(total, s + CH);
+        if (done(s, e)) continue;
+        let f = s; while (f < e && have[f]) f++;
+        if (!isConnected()) throw new Error('koneksi terputus');
+        await sendCmd(`GET ${f} ${e - f}`); requests++;
+        const deadline = performance.now() + 1500 + (e - f) * 3;
+        while (performance.now() < deadline && !done(f, e)) await sleep(20);
+        setProgress(count / total);
+        recMsg(`Mengambil data dari alat… ${count}/${total} sampel`);
+      }
+    }
+  } catch (err) {
+    console.warn(err);
+  }
+  dataHandler = null;
+  if (count < total) {
+    recUi.phase = 'idle'; setProgress(null);
+    recMsg(`Baru ${count}/${total} sampel yang terambil. Hubungkan lagi lalu tekan "Ambil rekaman di alat".`);
+    $('btnFetch').hidden = false; updateRecUi();
+    return;
+  }
+  saveClip(vals, total, requests);
+}
+
+function saveClip(vals, total, requests) {
+  const rows = [], subj = recUi.subject, label = recUi.label;
+  let maxA = 0;
+  const peaks = [];
+  for (let i = 0; i < total; i++) {
+    const ax = vals[i * 6] / 1000, ay = vals[i * 6 + 1] / 1000, az = vals[i * 6 + 2] / 1000;
+    const gx = vals[i * 6 + 3] / 10, gy = vals[i * 6 + 4] / 10, gz = vals[i * 6 + 5] / 10;
+    const a = Math.hypot(ax, ay, az);
+    if (a > maxA) maxA = a;
+    if (a > 2.5 && (!peaks.length || i - peaks[peaks.length - 1] > FS)) peaks.push(i);
+    rows.push([recUi.startMs + i * 20, label, ax, ay, az, gx, gy, gz, subj].join(','));
+  }
+  const csv = 'timestamp_ms,label,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps,subjek\n' + rows.join('\n') + '\n';
+  const slug = subj.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'subjek';
+  const ts = new Date(recUi.startMs);
+  const pad = x => String(x).padStart(2, '0');
+  const name = `imu_${slug}_${label}_${ts.getFullYear()}-${pad(ts.getMonth() + 1)}-${pad(ts.getDate())}-${pad(ts.getHours())}-${pad(ts.getMinutes())}-${pad(ts.getSeconds())}.csv`;
+  const clip = { name, csv, label, subj, total, maxA, peaks: peaks.length };
+  clips.unshift(clip);
+  downloadClip(clip);
+  renderClips();
+  recUi.phase = 'idle'; recUi.fetchedForThis = true; setProgress(null);
+  const info = label === 'jatuh' || label === 'lainnya' ? ` · benturan > 2,5 g: ${clip.peaks}` : '';
+  recMsg(`Tersimpan: ${name} (${total} sampel, ${(total / FS).toFixed(0)} detik, puncak ${maxA.toFixed(2)} g${info}).`);
+  addLog(`Klip tersimpan: ${subj} · ${label} · ${total} sampel (${requests} permintaan)`);
+  $('btnFetch').hidden = true;
+  updateRecUi();
+}
+
+function downloadClip(clip) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([clip.csv], { type: 'text/csv' }));
+  a.download = clip.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+function renderClips() {
+  $('clips').innerHTML = '';
+  clips.forEach(c => {
+    const li = document.createElement('li');
+    const span = document.createElement('span');
+    const extra = c.label === 'jatuh' || c.label === 'lainnya' ? ` · ${c.peaks} benturan` : '';
+    span.textContent = `${c.subj} · ${c.label} · ${(c.total / FS).toFixed(0)} dtk · puncak ${c.maxA.toFixed(1)} g${extra}`;
+    const btn = document.createElement('button');
+    btn.textContent = 'Unduh lagi';
+    btn.onclick = () => downloadClip(c);
+    li.append(span, btn);
+    $('clips').appendChild(li);
+  });
+}
 
 // ---------------- Log ----------------
 function addLog(text, fall = false) {
@@ -484,7 +698,7 @@ let demo = null;
 $('btnDemo').onclick = () => demoTimer ? stopDemo() : startDemo();
 function startDemo() {
   if (device?.gatt?.connected) device.gatt.disconnect();
-  demo = { t: 0, phase: 'diam', fc: 0, fall: false, n: 0 };
+  demo = { t: 0, phase: 'diam', fc: 0, fall: false, n: 0, rs: 0, recN: 0, recT: 0, rec: [] };
   cfg = { ffTh: 0.45, impTh: 2.5, impHardTh: 3.5, postSd: 0.12, angleTh: 45 };
   renderCfg();
   setConn('Mode demo', true); setControls(true);
@@ -499,16 +713,40 @@ function startDemo() {
     const amp = { diam: 0.01, jalan: 0.25, lari: 0.9 }[demo.phase];
     const az = 1 + amp * Math.sin(2 * Math.PI * f * sec) + (Math.random() - .5) * amp * .5;
     const gyr = { diam: 1, jalan: 60, lari: 180 }[demo.phase];
-    pushSample(performance.now(), (Math.random() - .5) * amp, (Math.random() - .5) * amp, az,
-      gyr * Math.sin(sec * 3), gyr * Math.cos(sec * 2), 0);
+    const dax = (Math.random() - .5) * amp, day = (Math.random() - .5) * amp;
+    const fallSpike = demo.rs === 1 && demo.recN % 400 === 200 ? 3.2 : 0;   // benturan simulasi
+    pushSample(performance.now(), dax, day, az + fallSpike, gyr * Math.sin(sec * 3), gyr * Math.cos(sec * 2), 0);
+    if (demo.rs === 1) {
+      demo.rec.push([dax * 1000, day * 1000, (az + fallSpike) * 1000, gyr * Math.sin(sec * 3) * 10, gyr * Math.cos(sec * 2) * 10, 0].map(Math.round));
+      if (++demo.recN >= demo.recT) { demo.rs = 2; demoStatus(); }
+    }
     if (demo.n % 25 === 0) {
-      const recent = samples.slice(-100).map(s => s.a);
-      const m = recent.reduce((a, b) => a + b, 0) / recent.length;
-      const sd = Math.sqrt(recent.reduce((a, b) => a + (b - m) ** 2, 0) / recent.length);
-      onStatus(JSON.stringify({ a: demo.phase, c: 0.85 + Math.random() * 0.15, us: 9000 + Math.random() * 500, f: demo.fall ? 1 : 0, sd, pk: Math.max(...recent), g: gyr * 0.7,
-        ang: demo.fall ? 90 : 0, imp: demo.fall ? 3.1 : 0, fc: demo.fc, n: demo.n }));
+      demoStatus();
     }
   }, 20);
+  updateRecUi();
+}
+function demoStatus() {
+  const recent = samples.slice(-100).map(s => s.a);
+  const m = recent.reduce((a, b) => a + b, 0) / recent.length;
+  const sd = Math.sqrt(recent.reduce((a, b) => a + (b - m) ** 2, 0) / recent.length);
+  const c = 0.75 + Math.random() * 0.25, idx = ['diam', 'jalan', 'lari'].indexOf(demo.phase);
+  const p = [0, 0, 0].map((_, i) => i === idx ? c : (1 - c) / 2);
+  const gyr = { diam: 1, jalan: 60, lari: 180 }[demo.phase];
+  onStatus(JSON.stringify({ a: demo.phase, c, p, us: 10500 + Math.random() * 500, f: demo.fall ? 1 : 0, sd, pk: Math.max(...recent), g: gyr * 0.7,
+    ang: demo.fall ? 90 : 0, imp: demo.fall ? 3.1 : 0, fc: demo.fc, rs: demo.rs, rn: demo.recN, rm: demo.rs === 1 ? demo.recT : demo.recN, n: demo.n }));
+}
+// kirim paket DATA dengan format persis seperti firmware; 20% paket sengaja "hilang"
+async function demoDump(start, count) {
+  const end = Math.min(start + count, demo.recN);
+  for (let s = start; s < end; s += 20) {
+    const n = Math.min(20, end - s);
+    const buf = new ArrayBuffer(6 + n * 12), dv = new DataView(buf);
+    dv.setUint8(0, 0xD1); dv.setUint32(1, s, true); dv.setUint8(5, n);
+    for (let i = 0; i < n; i++) for (let j = 0; j < 6; j++) dv.setInt16(6 + i * 12 + j * 2, demo.rec[s + i][j], true);
+    await sleep(8);
+    if (Math.random() > 0.2) onData(dv);
+  }
 }
 function stopDemo() {
   if (!demoTimer) return;
@@ -521,6 +759,9 @@ function demoCmd(s) {
   if (s === 'TEST') { demo.fall = true; demo.fc++; }
   if (s === 'ACK') demo.fall = false;
   if (s === 'RST' || s === 'GET') onStatus(JSON.stringify({ cfg }));
+  if (s.startsWith('REC ')) { demo.recT = parseInt(s.slice(4)); demo.recN = 0; demo.rec = []; demo.rs = 1; demoStatus(); }
+  if (s === 'RECSTOP' && demo.rs === 1) { demo.rs = demo.recN ? 2 : 0; demoStatus(); }
+  if (s.startsWith('GET ')) { const [, a, b] = s.split(' '); demoDump(parseInt(a), parseInt(b)); }
   if (s.startsWith('SET ')) { const [, k, v] = s.split(' '); cfg[k] = parseFloat(v); }
   if (s === 'CAL') addLog('gyro dikalibrasi (demo)');
 }
