@@ -117,6 +117,8 @@
         <div class="metric"><div class="v" id="mPk">—</div><div class="k">Puncak |a| (g)</div></div>
         <div class="metric"><div class="v" id="mG">—</div><div class="k">Rata-rata gyro (°/s)</div></div>
         <div class="metric"><div class="v" id="mFc">0</div><div class="k">Jumlah jatuh</div></div>
+        <div class="metric"><div class="v" id="mConf">—</div><div class="k">Keyakinan Random Forest</div></div>
+        <div class="metric"><div class="v" id="mUs">—</div><div class="k">Waktu inferensi (ms)</div></div>
       </div>
     </section>
 
@@ -184,10 +186,7 @@ const RAW = '6e7a0003-3c1b-4d2a-9f10-5a7e1c0d2b01';
 const CMD = '6e7a0004-3c1b-4d2a-9f10-5a7e1c0d2b01';
 
 const CFG_META = {
-  walkSd:    ['Std min. jalan (g)', 0.01],
-  runSd:     ['Std min. lari (g)', 0.01],
-  stillGyro: ['Gyro maks. diam (°/s)', 1],
-  ffTh:      ['Ambang free-fall (g)', 0.05],
+  ffTh:     ['Ambang free-fall (g)', 0.05],
   impTh:     ['Ambang impact (g)', 0.1],
   impHardTh: ['Impact keras (g)', 0.1],
   postSd:    ['Std maks. pasca jatuh (g)', 0.01],
@@ -209,7 +208,7 @@ let current = null, currentSince = Date.now();
 const segments = [];        // {act, start, end}
 const samples = [];         // ring buffer for chart: {t, a, g}
 let recording = false; const rec = [];
-let fallActive = false, lastFc = null;
+let fallActive = false, lastFc = null, lastConf = null;
 
 // ---------------- Koneksi BLE ----------------
 if (!navigator.bluetooth) $('warnBt').style.display = 'block';
@@ -283,6 +282,9 @@ function onStatus(text) {
   $('mPk').textContent = d.pk.toFixed(2);
   $('mG').textContent = d.g.toFixed(1);
   $('mFc').textContent = d.fc;
+  lastConf = typeof d.c === 'number' ? d.c : null;
+  $('mConf').textContent = lastConf === null ? '—' : Math.round(lastConf * 100) + '%';
+  $('mUs').textContent = typeof d.us === 'number' ? (d.us / 1000).toFixed(1) : '—';
 
   setActivity(d.a);
 
@@ -351,7 +353,8 @@ function renderTimeline() {
   for (const s of segments) tot[s.act] = (tot[s.act] || 0) + (s.end - s.start);
   $('totals').innerHTML = Object.entries(tot).map(([k, v]) =>
     `<span><span class="dot" style="background:${COLOR[k]}"></span>${cap(k)} <b>${fmtDur(v)}</b></span>`).join('');
-  if (current) $('heroSub').textContent = `Selama ${fmtDur(now - currentSince)}`;
+  if (current) $('heroSub').textContent = `Selama ${fmtDur(now - currentSince)}` +
+    (lastConf !== null ? ` · keyakinan model ${Math.round(lastConf * 100)}%` : '');
 }
 setInterval(renderTimeline, 1000);
 
@@ -482,7 +485,7 @@ $('btnDemo').onclick = () => demoTimer ? stopDemo() : startDemo();
 function startDemo() {
   if (device?.gatt?.connected) device.gatt.disconnect();
   demo = { t: 0, phase: 'diam', fc: 0, fall: false, n: 0 };
-  cfg = { walkSd: 0.06, runSd: 0.5, stillGyro: 25, ffTh: 0.45, impTh: 2.5, impHardTh: 3.5, postSd: 0.12, angleTh: 45 };
+  cfg = { ffTh: 0.45, impTh: 2.5, impHardTh: 3.5, postSd: 0.12, angleTh: 45 };
   renderCfg();
   setConn('Mode demo', true); setControls(true);
   $('btnDemo').textContent = 'Stop demo';
@@ -502,7 +505,7 @@ function startDemo() {
       const recent = samples.slice(-100).map(s => s.a);
       const m = recent.reduce((a, b) => a + b, 0) / recent.length;
       const sd = Math.sqrt(recent.reduce((a, b) => a + (b - m) ** 2, 0) / recent.length);
-      onStatus(JSON.stringify({ a: demo.phase, f: demo.fall ? 1 : 0, sd, pk: Math.max(...recent), g: gyr * 0.7,
+      onStatus(JSON.stringify({ a: demo.phase, c: 0.85 + Math.random() * 0.15, us: 9000 + Math.random() * 500, f: demo.fall ? 1 : 0, sd, pk: Math.max(...recent), g: gyr * 0.7,
         ang: demo.fall ? 90 : 0, imp: demo.fall ? 3.1 : 0, fc: demo.fc, n: demo.n }));
     }
   }, 20);
@@ -531,4 +534,3 @@ function fmtDur(ms) {
 </script>
 </body>
 </html>
-
