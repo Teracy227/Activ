@@ -107,6 +107,7 @@
     <h1>IMU Activity Monitor</h1>
     <span id="connPill" class="pill">Terputus</span>
     <button id="btnDemo">Mode demo</button>
+    <button id="btnUsb" title="Lewat kabel USB (Chrome/Edge di laptop)">Hubungkan via USB</button>
     <button id="btnConnect" class="primary">Hubungkan</button>
   </header>
 
@@ -249,11 +250,19 @@ let fallActive = false, lastFc = null, lastConf = null;
 // ---------------- Koneksi BLE ----------------
 if (!navigator.bluetooth) $('warnBt').style.display = 'block';
 
+let manualDisconnect = false;
+function bleDisconnect() {
+  if (!device?.gatt?.connected) return;
+  manualDisconnect = true;
+  device.gatt.disconnect();
+}
+
 $('btnConnect').onclick = async () => {
-  if (device?.gatt?.connected) { device.gatt.disconnect(); return; }
+  if (device?.gatt?.connected) { bleDisconnect(); return; }
   if (!navigator.bluetooth) { $('warnBt').style.display = 'block'; return; }
   try {
     stopDemo();
+    if (serialConn) await closeSerial('Terputus');
     setConn('Mencari…');
     device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
     device.addEventListener('gattserverdisconnected', onDisconnected);
@@ -291,6 +300,11 @@ async function connectGatt() {
 }
 
 async function onDisconnected() {
+  if (manualDisconnect) {
+    manualDisconnect = false;
+    setConn('Terputus'); setControls(false); addLog('Koneksi Bluetooth diputus');
+    return;
+  }
   setConn('Terputus — menyambung ulang…');
   setControls(false);
   addLog('Koneksi terputus');
@@ -303,7 +317,12 @@ async function onDisconnected() {
 
 async function sendCmd(s) {
   if (demoTimer) return demoCmd(s);
-  if (!chCmd) return;
+  if (serialConn) {
+    try { await serialConn.writer.write(new TextEncoder().encode(s + '\n')); }
+    catch (e) { console.warn('kirim perintah USB gagal', e); }
+    return;
+  }
+  if (!chCmd || !device?.gatt?.connected) return;
   try { await chCmd.writeValueWithResponse(new TextEncoder().encode(s)); }
   catch (e) { console.warn('kirim perintah gagal', e); }
 }
@@ -311,7 +330,77 @@ async function sendCmd(s) {
 function setConn(text, on = false) {
   $('connPill').textContent = text;
   $('connPill').classList.toggle('on', on);
-  $('btnConnect').textContent = on ? 'Putuskan' : 'Hubungkan';
+  $('btnConnect').textContent = device?.gatt?.connected ? 'Putuskan' : 'Hubungkan';
+  $('btnUsb').textContent = serialConn ? 'Putuskan USB' : 'Hubungkan via USB';
+}
+
+// ---------------- Koneksi USB (Web Serial, Chrome/Edge di laptop) ----------------
+// Firmware mencetak status JSON yang sama ke Serial, dan menerima perintah yang sama
+// (diakhiri baris baru). Rekaman diambil dengan "SDUMP <mulai> <jumlah>".
+let serialConn = null;
+let serialRowHandler = null;
+if (!('serial' in navigator)) $('btnUsb').hidden = true;
+
+$('btnUsb').onclick = async () => {
+  if (serialConn) { await closeSerial('Terputus'); addLog('Koneksi USB diputus'); return; }
+  try {
+    const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });  // Espressif
+    stopDemo();
+    bleDisconnect();
+    await port.open({ baudRate: 115200 });
+    serialConn = { port, writer: port.writable.getWriter(), reader: port.readable.getReader() };
+    hasRecorder = true;
+    setConn('Terhubung via USB', true);
+    setControls(true);
+    addLog('Terhubung lewat USB (grafik sinyal mentah hanya tersedia lewat Bluetooth)');
+    serialReadLoop(serialConn);
+    await sendCmd('GET');
+  } catch (e) {
+    console.error(e);
+    if (e.name !== 'NotFoundError') setConn('Gagal USB: ' + e.message);
+  }
+};
+
+async function serialReadLoop(conn) {
+  const dec = new TextDecoder();
+  let buf = '';
+  try {
+    while (true) {
+      const { value, done } = await conn.reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).replace(/\r$/, '');
+        buf = buf.slice(i + 1);
+        onSerialLine(line);
+      }
+    }
+  } catch (e) {
+    console.warn('USB:', e);
+  }
+  if (serialConn === conn) { await closeSerial('USB terlepas'); addLog('Kabel USB terlepas'); }
+}
+
+const ROW_RE = /^(\d+),(-?\d+),(-?\d+),(-?\d+),(-?\d+),(-?\d+),(-?\d+)$/;
+let serialDumpFinished = false;
+function onSerialLine(line) {
+  if (line.startsWith('{')) { onStatus(line); return; }
+  if (line.startsWith('# SDUMP selesai')) { serialDumpFinished = true; return; }
+  const m = ROW_RE.exec(line);
+  if (m && serialRowHandler) serialRowHandler(+m[1], m.slice(2).map(Number));
+}
+
+async function closeSerial(msg) {
+  const c = serialConn;
+  if (!c) return;
+  serialConn = null;
+  try { await c.reader.cancel(); } catch {}
+  try { c.reader.releaseLock(); } catch {}
+  try { c.writer.releaseLock(); } catch {}
+  try { await c.port.close(); } catch {}
+  setConn(msg || 'Terputus');
+  setControls(false);
 }
 function setControls(on) {
   ['btnSave', 'btnCal', 'btnRst', 'btnTest'].forEach(id => $(id).disabled = !on);
@@ -509,7 +598,7 @@ const clips = [];
 let dataHandler = null;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function isConnected() { return !!demoTimer || !!device?.gatt?.connected; }
+function isConnected() { return !!demoTimer || !!serialConn || !!device?.gatt?.connected; }
 
 function updateRecUi() {
   const conn = isConnected() && (hasRecorder || !!demoTimer);
@@ -591,18 +680,25 @@ async function fetchClip(total) {
   recUi.phase = 'fetching'; updateRecUi(); $('btnFetch').hidden = true;
   const vals = new Int16Array(total * 6), have = new Uint8Array(total);
   let count = 0;
+  const accept = (k, v6) => {
+    if (k < 0 || k >= total || have[k]) return;
+    for (let j = 0; j < 6; j++) vals[k * 6 + j] = v6[j];
+    have[k] = 1; count++;
+  };
+  // Bluetooth: paket biner dari characteristic DATA
   dataHandler = dv => {
     if (dv.byteLength < 6 || dv.getUint8(0) !== 0xD1) return;
     const s = dv.getUint32(1, true), n = dv.getUint8(5);
     for (let i = 0; i < n; i++) {
-      const k = s + i;
-      if (k >= total || have[k] || 6 + (i + 1) * 12 > dv.byteLength) continue;
-      for (let j = 0; j < 6; j++) vals[k * 6 + j] = dv.getInt16(6 + i * 12 + j * 2, true);
-      have[k] = 1; count++;
+      if (6 + (i + 1) * 12 > dv.byteLength) break;
+      accept(s + i, [0, 1, 2, 3, 4, 5].map(j => dv.getInt16(6 + i * 12 + j * 2, true)));
     }
   };
+  // USB: baris teks "indeks,ax,ay,az,gx,gy,gz" dari perintah SDUMP
+  serialRowHandler = accept;
+  const viaUsb = !!serialConn;
   const done = (a, b) => { for (let i = a; i < b; i++) if (!have[i]) return false; return true; };
-  const CH = 200;
+  const CH = viaUsb ? 2000 : 200;
   let requests = 0;
   try {
     for (let pass = 0; pass < 8 && count < total; pass++) {
@@ -611,9 +707,11 @@ async function fetchClip(total) {
         if (done(s, e)) continue;
         let f = s; while (f < e && have[f]) f++;
         if (!isConnected()) throw new Error('koneksi terputus');
-        await sendCmd(`GET ${f} ${e - f}`); requests++;
-        const deadline = performance.now() + 1500 + (e - f) * 3;
-        while (performance.now() < deadline && !done(f, e)) await sleep(20);
+        serialDumpFinished = false;
+        await sendCmd(viaUsb ? `SDUMP ${f} ${e - f}` : `GET ${f} ${e - f}`); requests++;
+        const deadline = performance.now() + (viaUsb ? 3000 + (e - f) : 1500 + (e - f) * 3);
+        // USB: berhenti menunggu begitu firmware mencetak "# SDUMP selesai"
+        while (performance.now() < deadline && !done(f, e) && !(viaUsb && serialDumpFinished)) await sleep(20);
         setProgress(count / total);
         recMsg(`Mengambil data dari alat… ${count}/${total} sampel`);
       }
@@ -622,6 +720,7 @@ async function fetchClip(total) {
     console.warn(err);
   }
   dataHandler = null;
+  serialRowHandler = null;
   if (count < total) {
     recUi.phase = 'idle'; setProgress(null);
     recMsg(`Baru ${count}/${total} sampel yang terambil. Hubungkan lagi lalu tekan "Ambil rekaman di alat".`);
@@ -697,7 +796,8 @@ function addLog(text, fall = false) {
 let demo = null;
 $('btnDemo').onclick = () => demoTimer ? stopDemo() : startDemo();
 function startDemo() {
-  if (device?.gatt?.connected) device.gatt.disconnect();
+  bleDisconnect();
+  if (serialConn) closeSerial('Terputus');
   demo = { t: 0, phase: 'diam', fc: 0, fall: false, n: 0, rs: 0, recN: 0, recT: 0, rec: [] };
   cfg = { ffTh: 0.45, impTh: 2.5, impHardTh: 3.5, postSd: 0.12, angleTh: 45 };
   renderCfg();
